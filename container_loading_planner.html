@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>컨테이너 로딩 플래너 (CIP)</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --border:#dfe4ea; --text:#1f2937; --muted:#6b7280;
+    --accent:#2f6fed; --accent-dark:#1c4fc0; --danger:#e0393e; --ok:#12b886; --warn:#f59f00;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Pretendard","Segoe UI",Malgun Gothic,sans-serif;background:var(--bg);color:var(--text);}
+  .app{display:flex;height:100vh;overflow:hidden;}
+  .sidebar{width:380px;min-width:380px;background:var(--panel);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;overflow-y:auto;padding:16px;gap:16px;}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;}
+  h1{font-size:17px;margin:0 0 2px;}
+  .sub{font-size:12px;color:var(--muted);margin:0 0 8px;}
+  .card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:#fff;}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--text);display:flex;align-items:center;gap:6px;}
+  label{font-size:11px;color:var(--muted);display:block;margin-bottom:3px;}
+  .row{display:flex;gap:8px;margin-bottom:8px;}
+  .row > div{flex:1;}
+  input,select{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text);}
+  input[type=color]{padding:2px;height:32px;}
+  button{cursor:pointer;border:none;border-radius:7px;padding:8px 12px;font-size:13px;font-weight:600;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-primary:hover{background:var(--accent-dark);}
+  .btn-outline{background:#fff;border:1px solid var(--border);color:var(--text);}
+  .btn-outline:hover{background:#f1f3f5;}
+  .btn-danger{background:#fff;border:1px solid var(--danger);color:var(--danger);}
+  .btn-danger:hover{background:#fff5f5;}
+  .btn-sm{padding:4px 8px;font-size:11px;border-radius:5px;}
+  .full{width:100%;}
+  .mode-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  .mode-toggle button{flex:1;border-radius:0;background:#fff;color:var(--muted);}
+  .mode-toggle button.active{background:var(--accent);color:#fff;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:6px 4px;text-align:left;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:11px;}
+  .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:4px;vertical-align:middle;}
+  .list-scroll{max-height:220px;overflow-y:auto;}
+  .empty{color:var(--muted);font-size:12px;padding:8px 2px;}
+  .stat-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+  .bar-bg{background:#eef0f3;border-radius:5px;height:8px;overflow:hidden;margin-bottom:10px;}
+  .bar-fill{height:100%;background:var(--accent);transition:width .3s;}
+  .bar-fill.warn{background:var(--warn);}
+  .bar-fill.danger{background:var(--danger);}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;
+    border-bottom:1px solid var(--border);background:var(--panel);}
+  .topbar .title{font-size:14px;font-weight:700;}
+  .topbar .actions{display:flex;gap:8px;}
+  #viewport{flex:1;position:relative;background:linear-gradient(180deg,#dfe9f7,#eef2f7);}
+  canvas{display:block;}
+  #status{position:absolute;left:14px;bottom:14px;background:rgba(31,41,55,.9);color:#fff;
+    padding:8px 12px;border-radius:8px;font-size:12px;max-width:60%;opacity:0;transition:opacity .3s;pointer-events:none;}
+  #status.show{opacity:1;}
+  #hint{position:absolute;right:14px;top:14px;background:rgba(255,255,255,.92);border:1px solid var(--border);
+    padding:10px 12px;border-radius:8px;font-size:11.5px;color:var(--muted);max-width:240px;line-height:1.5;}
+  .pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10.5px;font-weight:700;}
+  .pill.wait{background:#eef2ff;color:var(--accent);}
+  .pill.done{background:#e6fcf5;color:var(--ok);}
+  .armed{outline:2px solid var(--accent);}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <div>
+      <h1>🚢 컨테이너 로딩 플래너</h1>
+      <p class="sub">CIP · 컨테이너 규격을 선택하고 화물을 등록해 적재 계획을 시뮬레이션합니다.</p>
+    </div>
+
+    <div class="card">
+      <h2>1. 컨테이너 규격</h2>
+      <label>규격 선택</label>
+      <select id="presetSelect" class="full"></select>
+      <div class="row" style="margin-top:8px;">
+        <div><label>길이 L (cm)</label><input id="cL" type="number" min="1"></div>
+        <div><label>폭 W (cm)</label><input id="cW" type="number" min="1"></div>
+        <div><label>높이 H (cm)</label><input id="cH" type="number" min="1"></div>
+      </div>
+      <div class="row">
+        <div><label>최대 적재중량 (kg)</label><input id="cMax" type="number" min="0"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. 배치 모드</h2>
+      <div class="mode-toggle">
+        <button id="modeAutoBtn" class="active">자동 배치</button>
+        <button id="modeManualBtn">수동 배치</button>
+      </div>
+      <p class="sub" id="modeDesc" style="margin-top:8px;">화물을 등록하면 최적 알고리즘이 자동으로 적재 위치를 계산합니다.</p>
+      <button id="runAutoBtn" class="btn-primary full" style="margin-top:4px;">자동 배치 실행</button>
+    </div>
+
+    <div class="card">
+      <h2>3. 화물 등록</h2>
+      <div class="row">
+        <div><label>품명</label><input id="fName" type="text" placeholder="예: 팔레트 A"></div>
+      </div>
+      <div class="row">
+        <div><label>길이 (cm)</label><input id="fL" type="number" min="1" value="100"></div>
+        <div><label>너비 (cm)</label><input id="fW" type="number" min="1" value="100"></div>
+        <div><label>높이 (cm)</label><input id="fH" type="number" min="1" value="100"></div>
+      </div>
+      <div class="row">
+        <div><label>무게 (kg)</label><input id="fWeight" type="number" min="0" value="50"></div>
+        <div><label>수량</label><input id="fQty" type="number" min="1" value="1"></div>
+        <div style="flex:0 0 60px;"><label>색상</label><input id="fColor" type="color" value="#2f6fed"></div>
+      </div>
+      <button id="addCargoBtn" class="btn-primary full">+ 화물 추가</button>
+    </div>
+
+    <div class="card">
+      <h2>4. 화물 목록 <span id="cargoCount" class="sub"></span></h2>
+      <div class="list-scroll">
+        <table>
+          <thead><tr><th></th><th>품명</th><th>규격</th><th>수량</th><th></th></tr></thead>
+          <tbody id="cargoTableBody"></tbody>
+        </table>
+        <div id="cargoEmpty" class="empty">등록된 화물이 없습니다.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>5. 적재 현황</h2>
+      <div class="stat-row"><span>부피 적재율</span><span id="volPct">0%</span></div>
+      <div class="bar-bg"><div id="volBar" class="bar-fill" style="width:0%"></div></div>
+      <div class="stat-row"><span>중량</span><span id="weightPct">0 / 0 kg</span></div>
+      <div class="bar-bg"><div id="weightBar" class="bar-fill" style="width:0%"></div></div>
+      <div class="stat-row"><span>적재 완료</span><span id="placedCount">0개</span></div>
+      <div class="stat-row"><span>미적재</span><span id="unplacedCount">0개</span></div>
+      <div id="unplacedList" class="empty"></div>
+    </div>
+
+    <button id="resetAllBtn" class="btn-danger full">전체 초기화</button>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="title" id="containerTitle">20ft Dry (20GP)</div>
+      <div class="actions">
+        <button id="camResetBtn" class="btn-outline btn-sm">카메라 리셋</button>
+      </div>
+    </div>
+    <div id="viewport">
+      <div id="hint"></div>
+      <div id="status"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+/* ---------- 데이터 ---------- */
+const CONTAINER_PRESETS = {
+  '20ft': { label:'20ft Dry (20GP)', L:589, W:235, H:239, maxWeight:28280 },
+  '40ft': { label:'40ft Dry (40GP)', L:1203, W:235, H:239, maxWeight:26780 },
+  '40hc': { label:'40ft High Cube (40HC)', L:1203, W:235, H:269, maxWeight:26580 },
+  '45hc': { label:'45ft High Cube (45HC)', L:1350, W:235, H:269, maxWeight:27700 },
+  'custom': { label:'직접 입력', L:600, W:235, H:239, maxWeight:28000 },
+};
+const PALETTE = ['#2f6fed','#f76707','#12b886','#e64980','#7048e8','#fab005','#15aabf','#82c91e','#fa5252','#228be6'];
+
+const state = {
+  presetKey: '20ft',
+  container: {...CONTAINER_PRESETS['20ft']},
+  mode: 'auto', // auto | manual
+  cargo: [], // {id, name, l, w, h, weight, qty, remaining, color}
+  placed: [], // {id, cargoId, name, x, y, z, bl, bz, bh, color, weight}
+  armedCargoId: null,
+  armedRotated: false,
+  nextCargoId: 1,
+  nextPlacedId: 1,
+  colorIdx: 0,
+};
+
+/* ---------- DOM refs ---------- */
+const el = (id) => document.getElementById(id);
+const presetSelect = el('presetSelect');
+const cL = el('cL'), cW = el('cW'), cH = el('cH'), cMax = el('cMax');
+const modeAutoBtn = el('modeAutoBtn'), modeManualBtn = el('modeManualBtn'), modeDesc = el('modeDesc');
+const runAutoBtn = el('runAutoBtn');
+const cargoTableBody = el('cargoTableBody'), cargoEmpty = el('cargoEmpty'), cargoCount = el('cargoCount');
+const statusBox = el('status'), hintBox = el('hint');
+const containerTitle = el('containerTitle');
+
+/* ---------- 프리셋 셀렉트 초기화 ---------- */
+Object.entries(CONTAINER_PRESETS).forEach(([key, p]) => {
+  const opt = document.createElement('option');
+  opt.value = key; opt.textContent = p.label;
+  presetSelect.appendChild(opt);
+});
+presetSelect.value = state.presetKey;
+
+function showStatus(msg, ms = 2200){
+  statusBox.textContent = msg;
+  statusBox.classList.add('show');
+  clearTimeout(showStatus._t);
+  showStatus._t = setTimeout(()=>statusBox.classList.remove('show'), ms);
+}
+
+function syncContainerInputs(){
+  cL.value = state.container.L; cW.value = state.container.W; cH.value = state.container.H;
+  cMax.value = state.container.maxWeight;
+  containerTitle.textContent = `${CONTAINER_PRESETS[state.presetKey]?.label || '직접 입력'} · ${state.container.L}×${state.container.W}×${state.container.H} cm`;
+}
+syncContainerInputs();
+
+function resetPlacementsForContainerChange(){
+  state.placed = [];
+  state.cargo.forEach(c => c.remaining = c.qty);
+  state.armedCargoId = null;
+  rebuildContainerMesh();
+  refreshBoxMeshes();
+  renderCargoTable();
+  updateStats();
+}
+
+presetSelect.addEventListener('change', () => {
+  state.presetKey = presetSelect.value;
+  state.container = {...CONTAINER_PRESETS[state.presetKey]};
+  syncContainerInputs();
+  showStatus('컨테이너 규격이 변경되어 적재 내역이 초기화되었습니다.');
+  resetPlacementsForContainerChange();
+});
+[cL, cW, cH, cMax].forEach(inp => inp.addEventListener('change', () => {
+  state.presetKey = 'custom';
+  presetSelect.value = 'custom';
+  state.container = {
+    ...CONTAINER_PRESETS.custom,
+    L: Math.max(1, +cL.value || 1), W: Math.max(1, +cW.value || 1),
+    H: Math.max(1, +cH.value || 1), maxWeight: Math.max(0, +cMax.value || 0),
+  };
+  syncContainerInputs();
+  showStatus('컨테이너 규격이 변경되어 적재 내역이 초기화되었습니다.');
+  resetPlacementsForContainerChange();
+}));
+
+/* ---------- 모드 전환 ---------- */
+function setMode(mode){
+  if(state.mode === mode) return;
+  state.mode = mode;
+  modeAutoBtn.classList.toggle('active', mode==='auto');
+  modeManualBtn.classList.toggle('active', mode==='manual');
+  runAutoBtn.style.display = mode==='auto' ? 'block' : 'none';
+  modeDesc.textContent = mode==='auto'
+    ? '화물을 등록하면 최적 알고리즘이 자동으로 적재 위치를 계산합니다.'
+    : '화물 목록에서 "배치" 버튼을 누른 뒤, 우측 3D 컨테이너 바닥을 클릭해 위치를 지정하세요.';
+  updateHint();
+  state.armedCargoId = null;
+  showStatus('모드가 변경되어 적재 내역이 초기화되었습니다.');
+  state.placed = [];
+  state.cargo.forEach(c => c.remaining = c.qty);
+  refreshBoxMeshes();
+  renderCargoTable();
+  updateStats();
+}
+modeAutoBtn.addEventListener('click', () => setMode('auto'));
+modeManualBtn.addEventListener('click', () => setMode('manual'));
+
+function updateHint(){
+  if(state.mode === 'manual'){
+    hintBox.innerHTML = `<b>수동 배치 안내</b><br>1) 목록에서 화물의 "배치" 버튼 클릭<br>2) 컨테이너 바닥 클릭 → 해당 위치에 적재(자동으로 쌓임)<br>3) 배치된 화물은 목록에서 "취소"로 되돌릴 수 있음`;
+    hintBox.style.display = 'block';
+  } else {
+    hintBox.style.display = 'none';
+  }
+}
+updateHint();
+
+/* ---------- 화물 등록 ---------- */
+el('addCargoBtn').addEventListener('click', () => {
+  const name = el('fName').value.trim() || `화물 ${state.nextCargoId}`;
+  const l = +el('fL').value, w = +el('fW').value, h = +el('fH').value;
+  const weight = Math.max(0, +el('fWeight').value || 0);
+  const qty = Math.max(1, Math.floor(+el('fQty').value || 1));
+  const color = el('fColor').value;
+  if(!(l>0 && w>0 && h>0)){ showStatus('길이/너비/높이는 0보다 커야 합니다.'); return; }
+  const fitsFlat = (l<=state.container.L && w<=state.container.W) || (w<=state.container.L && l<=state.container.W);
+  if(!fitsFlat || h>state.container.H){
+    showStatus(`"${name}"은(는) 현재 컨테이너 규격에 들어가지 않는 크기입니다.`, 3000);
+  }
+  state.cargo.push({ id: state.nextCargoId++, name, l, w, h, weight, qty, remaining: qty, color });
+  el('fName').value = '';
+  const nextColor = PALETTE[state.colorIdx++ % PALETTE.length];
+  el('fColor').value = nextColor;
+  renderCargoTable();
+  updateStats();
+});
+
+function renderCargoTable(){
+  cargoTableBody.innerHTML = '';
+  cargoEmpty.style.display = state.cargo.length ? 'none' : 'block';
+  cargoCount.textContent = state.cargo.length ? `(${state.cargo.length}종)` : '';
+  state.cargo.forEach(c => {
+    const tr = document.createElement('tr');
+    const placedCnt = c.qty - c.remaining;
+    tr.innerHTML = `
+      <td><span class="swatch" style="background:${c.color}"></span></td>
+      <td>${c.name}</td>
+      <td>${c.l}×${c.w}×${c.h}</td>
+      <td>
+        ${state.mode==='manual'
+          ? `<span class="pill ${c.remaining>0?'wait':'done'}">${c.remaining}/${c.qty}</span>`
+          : `${placedIsAuto(c.id)}${c.qty}개`}
+      </td>
+      <td style="white-space:nowrap;">
+        ${state.mode==='manual' && c.remaining>0 ? `<button data-arm="${c.id}" class="btn-outline btn-sm">배치</button>` : ''}
+        <button data-del="${c.id}" class="btn-danger btn-sm">삭제</button>
+      </td>`;
+    if(state.mode==='manual' && state.armedCargoId===c.id) tr.classList.add('armed');
+    cargoTableBody.appendChild(tr);
+  });
+  cargoTableBody.querySelectorAll('[data-arm]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.armedCargoId = +btn.dataset.arm;
+      state.armedRotated = false;
+      renderCargoTable();
+      showStatus('컨테이너 바닥을 클릭해 배치 위치를 지정하세요.');
+    });
+  });
+  cargoTableBody.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = +btn.dataset.del;
+      state.cargo = state.cargo.filter(c => c.id !== id);
+      state.placed = state.placed.filter(p => p.cargoId !== id);
+      if(state.armedCargoId === id) state.armedCargoId = null;
+      refreshBoxMeshes();
+      renderCargoTable();
+      updateStats();
+    });
+  });
+  renderPlacedGhostHighlight();
+}
+function placedIsAuto(){ return ''; }
+
+/* ---------- 3D 배치된 화물 취소용 패널은 상태 카드 하단에 간단히 노출 ---------- */
+function renderPlacedGhostHighlight(){ /* placeholder for future extension */ }
+
+/* ---------- 자동 적재 알고리즘 (3D Guillotine bin packing) ---------- */
+function runAutoPack(){
+  const { L, W, H } = state.container;
+  let freeSpaces = [{ x:0, y:0, z:0, sx:L, sy:H, sz:W }];
+  const units = [];
+  state.cargo.forEach(c => {
+    for(let i=0;i<c.qty;i++) units.push({ cargoId:c.id, name:c.name, l:c.l, w:c.w, h:c.h, weight:c.weight, color:c.color });
+  });
+  units.sort((a,b) => (b.l*b.w*b.h) - (a.l*a.w*a.h));
+
+  const placed = [];
+  const unplaced = [];
+
+  units.forEach(u => {
+    let bestIdx = -1, bestOrient = null, bestLeftover = Infinity;
+    freeSpaces.forEach((space, idx) => {
+      [[u.l,u.w],[u.w,u.l]].forEach(([bl,bz]) => {
+        if(bl<=space.sx && bz<=space.sz && u.h<=space.sy){
+          const leftover = (space.sx*space.sy*space.sz) - (bl*u.h*bz);
+          if(leftover < bestLeftover){ bestLeftover = leftover; bestIdx = idx; bestOrient = [bl,bz]; }
+        }
+      });
+    });
+    if(bestIdx === -1){ unplaced.push(u); return; }
+    const space = freeSpaces[bestIdx];
+    const [bl, bz] = bestOrient;
+    placed.push({
+      id: state.nextPlacedId++, cargoId: u.cargoId, name: u.name,
+      x: space.x, y: space.y, z: space.z, bl, bh: u.h, bz, color: u.color, weight: u.weight,
+    });
+    freeSpaces.splice(bestIdx, 1);
+    if(space.sx - bl > 0) freeSpaces.push({ x:space.x+bl, y:space.y, z:space.z, sx:space.sx-bl, sy:space.sy, sz:space.sz });
+    if(space.sz - bz > 0) freeSpaces.push({ x:space.x, y:space.y, z:space.z+bz, sx:bl, sy:space.sy, sz:space.sz-bz });
+    if(space.sy - u.h > 0) freeSpaces.push({ x:space.x, y:space.y+u.h, z:space.z, sx:bl, sy:space.sy-u.h, sz:bz });
+  });
+
+  state.placed = placed;
+  state.cargo.forEach(c => c.remaining = 0);
+  refreshBoxMeshes();
+  renderCargoTable();
+  updateStats(unplaced);
+  showStatus(`자동 배치 완료: ${placed.length}개 적재, ${unplaced.length}개 미적재`);
+}
+runAutoBtn.addEventListener('click', runAutoPack);
+
+/* ---------- 통계 ---------- */
+function updateStats(unplacedFromAuto){
+  const { L, W, H, maxWeight } = state.container;
+  const containerVol = L*W*H;
+  const usedVol = state.placed.reduce((s,p) => s + p.bl*p.bh*p.bz, 0);
+  const usedWeight = state.placed.reduce((s,p) => s + p.weight, 0);
+  const volPct = containerVol>0 ? Math.min(100, (usedVol/containerVol*100)) : 0;
+  const weightPct = maxWeight>0 ? Math.min(100, (usedWeight/maxWeight*100)) : 0;
+
+  el('volPct').textContent = `${volPct.toFixed(1)}%`;
+  el('volBar').style.width = `${volPct}%`;
+  el('volBar').className = 'bar-fill' + (volPct>95?' danger':volPct>80?' warn':'');
+
+  el('weightPct').textContent = `${usedWeight.toLocaleString()} / ${maxWeight.toLocaleString()} kg`;
+  el('weightBar').style.width = `${weightPct}%`;
+  el('weightBar').className = 'bar-fill' + (weightPct>100?' danger':weightPct>85?' warn':'');
+
+  el('placedCount').textContent = `${state.placed.length}개`;
+
+  let unplacedList = [];
+  if(unplacedFromAuto){
+    unplacedList = unplacedFromAuto;
+  } else if(state.mode==='manual'){
+    state.cargo.forEach(c => { for(let i=0;i<c.remaining;i++) unplacedList.push({name:c.name}); });
+  }
+  el('unplacedCount').textContent = `${unplacedList.length}개`;
+  const namesSet = [...new Set(unplacedList.map(u=>u.name))];
+  el('unplacedList').textContent = namesSet.length ? `미적재: ${namesSet.join(', ')}` : '';
+}
+
+/* ---------- 전체 초기화 ---------- */
+el('resetAllBtn').addEventListener('click', () => {
+  state.cargo = [];
+  state.placed = [];
+  state.armedCargoId = null;
+  refreshBoxMeshes();
+  renderCargoTable();
+  updateStats();
+  showStatus('전체 초기화되었습니다.');
+});
+
+/* ==================== THREE.JS 3D 뷰 ==================== */
+const viewport = el('viewport');
+const scene = new THREE.Scene();
+scene.background = null;
+
+const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth/viewport.clientHeight, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+viewport.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 2;
+controls.maxDistance = 60;
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight.position.set(8, 12, 6);
+scene.add(ambient, dirLight);
+
+let containerGroup = new THREE.Group();
+let boxesGroup = new THREE.Group();
+let ghostMesh = null;
+scene.add(containerGroup, boxesGroup);
+
+function setCamera(){
+  const { L, W, H } = state.container;
+  const cx = (L/100)/2, cy = (H/100)/2, cz = (W/100)/2;
+  const dist = Math.max(L,W,H)/100 * 1.6 + 2;
+  camera.position.set(cx + dist*0.7, cy + dist*0.55, cz + dist*0.9);
+  controls.target.set(cx, cy*0.4, cz);
+  controls.update();
+}
+
+function rebuildContainerMesh(){
+  containerGroup.clear();
+  const { L, W, H } = state.container;
+  const sx = L/100, sy = H/100, sz = W/100;
+
+  const geo = new THREE.BoxGeometry(sx, sy, sz);
+  geo.translate(sx/2, sy/2, sz/2);
+  const edges = new THREE.EdgesGeometry(geo);
+  const lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x2f6fed, linewidth: 2 }));
+  containerGroup.add(lines);
+
+  const floorGeo = new THREE.PlaneGeometry(sx, sz);
+  floorGeo.rotateX(-Math.PI/2);
+  floorGeo.translate(sx/2, 0, sz/2);
+  const floorMat = new THREE.MeshBasicMaterial({ color:0xbcd0f7, transparent:true, opacity:0.25, side:THREE.DoubleSide });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.name = 'floor';
+  containerGroup.add(floor);
+
+  const grid = new THREE.GridHelper(Math.max(sx,sz), Math.max(4, Math.round(Math.max(sx,sz))), 0x9fb7e8, 0xd7e2f7);
+  grid.position.set(sx/2, 0.001, sz/2);
+  containerGroup.add(grid);
+
+  setCamera();
+}
+
+function refreshBoxMeshes(){
+  boxesGroup.clear();
+  state.placed.forEach(p => {
+    const sx = p.bl/100, sy = p.bh/100, sz = p.bz/100;
+    const geo = new THREE.BoxGeometry(sx*0.97, sy*0.97, sz*0.97);
+    const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(p.color) });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((p.x+p.bl/2)/100, (p.y+p.bh/2)/100, (p.z+p.bz/2)/100);
+    boxesGroup.add(mesh);
+
+    const edges = new THREE.EdgesGeometry(geo);
+    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color:0x1f2937, transparent:true, opacity:0.35 }));
+    line.position.copy(mesh.position);
+    boxesGroup.add(line);
+  });
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+rebuildContainerMesh();
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = viewport.clientWidth/viewport.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+});
+
+el('camResetBtn').addEventListener('click', setCamera);
+
+/* ---------- 수동 배치: 바닥 클릭으로 화물 놓기 ---------- */
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+const floorPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+
+function getFloorPoint(evt){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouseNDC.x = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((evt.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseNDC, camera);
+  const pt = new THREE.Vector3();
+  const hit = raycaster.ray.intersectPlane(floorPlane, pt);
+  return hit ? pt : null;
+}
+
+function tryPlaceArmedCargo(xCm, zCm){
+  const cargo = state.cargo.find(c => c.id === state.armedCargoId);
+  if(!cargo || cargo.remaining<=0) return;
+  const { L, W, H } = state.container;
+  let bl = state.armedRotated ? cargo.w : cargo.l;
+  let bz = state.armedRotated ? cargo.l : cargo.w;
+  if(bl>L || bz>W){
+    // try the other orientation automatically
+    [bl,bz] = [bz,bl];
+    if(bl>L || bz>W){ showStatus('이 화물은 컨테이너 바닥에 들어가지 않습니다.'); return; }
+  }
+  let x0 = xCm - bl/2, z0 = zCm - bz/2;
+  x0 = Math.min(Math.max(x0,0), L-bl);
+  z0 = Math.min(Math.max(z0,0), W-bz);
+
+  let restY = 0;
+  state.placed.forEach(p => {
+    const overlap = x0 < p.x+p.bl && x0+bl > p.x && z0 < p.z+p.bz && z0+bz > p.z;
+    if(overlap) restY = Math.max(restY, p.y + p.bh);
+  });
+  if(restY + cargo.h > H){ showStatus('해당 위치는 컨테이너 높이를 초과하여 배치할 수 없습니다.'); return; }
+
+  state.placed.push({
+    id: state.nextPlacedId++, cargoId: cargo.id, name: cargo.name,
+    x:x0, y:restY, z:z0, bl, bh:cargo.h, bz, color:cargo.color, weight:cargo.weight,
+  });
+  cargo.remaining -= 1;
+  if(cargo.remaining<=0) state.armedCargoId = null;
+  refreshBoxMeshes();
+  renderCargoTable();
+  updateStats();
+  showStatus(`"${cargo.name}" 배치 완료 (남은 수량 ${cargo.remaining}개)`);
+}
+
+renderer.domElement.addEventListener('click', (evt) => {
+  if(state.mode!=='manual' || !state.armedCargoId) return;
+  const pt = getFloorPoint(evt);
+  if(!pt) return;
+  const { L, W } = state.container;
+  const xCm = pt.x*100, zCm = pt.z*100;
+  if(xCm<0 || xCm>L || zCm<0 || zCm>W){ showStatus('컨테이너 바닥 범위 안을 클릭해주세요.'); return; }
+  tryPlaceArmedCargo(xCm, zCm);
+});
+
+/* R 키: 배치 전 화물 회전 */
+window.addEventListener('keydown', (e) => {
+  if(e.key.toLowerCase()==='r' && state.mode==='manual' && state.armedCargoId){
+    state.armedRotated = !state.armedRotated;
+    showStatus('회전 적용됨 (다음 클릭부터 반영)');
+  }
+  if(e.key==='Escape'){ state.armedCargoId = null; renderCargoTable(); }
+});
+
+/* 배치된 화물 취소: 목록의 "취소" — placed 항목을 카드로 노출 */
+function ensurePlacedPanel(){
+  let panel = document.getElementById('placedPanelCard');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.className = 'card';
+    panel.id = 'placedPanelCard';
+    panel.innerHTML = `<h2>6. 배치된 화물 <span class="sub" id="placedPanelCount"></span></h2>
+      <div class="list-scroll" id="placedPanelList"></div>`;
+    document.querySelector('.sidebar').insertBefore(panel, document.getElementById('resetAllBtn'));
+  }
+  return panel;
+}
+function renderPlacedPanel(){
+  ensurePlacedPanel();
+  const list = document.getElementById('placedPanelList');
+  const countEl = document.getElementById('placedPanelCount');
+  countEl.textContent = state.placed.length ? `(${state.placed.length}개)` : '';
+  if(!state.placed.length){ list.innerHTML = `<div class="empty">배치된 화물이 없습니다.</div>`; return; }
+  list.innerHTML = '';
+  const table = document.createElement('table');
+  table.innerHTML = `<thead><tr><th></th><th>품명</th><th>위치(L,W,H)</th><th></th></tr></thead><tbody></tbody>`;
+  const tbody = table.querySelector('tbody');
+  state.placed.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><span class="swatch" style="background:${p.color}"></span></td>
+      <td>${p.name}</td>
+      <td>${Math.round(p.x)},${Math.round(p.z)},${Math.round(p.y)}</td>
+      <td><button data-unplace="${p.id}" class="btn-outline btn-sm">취소</button></td>`;
+    tbody.appendChild(tr);
+  });
+  list.appendChild(table);
+  list.querySelectorAll('[data-unplace]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pid = +btn.dataset.unplace;
+      const p = state.placed.find(x => x.id===pid);
+      if(!p) return;
+      state.placed = state.placed.filter(x => x.id!==pid);
+      const cargo = state.cargo.find(c => c.id===p.cargoId);
+      if(cargo) cargo.remaining = Math.min(cargo.qty, cargo.remaining+1);
+      refreshBoxMeshes();
+      renderCargoTable();
+      updateStats();
+    });
+  });
+}
+const _origRefresh = refreshBoxMeshes;
+refreshBoxMeshes = function(){ _origRefresh(); renderPlacedPanel(); };
+
+/* ---------- 초기 렌더 ---------- */
+renderCargoTable();
+updateStats();
+</script>
+</body>
+</html>
